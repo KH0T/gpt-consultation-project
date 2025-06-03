@@ -1,65 +1,88 @@
-// 1. .env에 있는 DB 정보 불러오기
-require('dotenv').config();
-console.log("👉 환경변수 체크:", process.env.MYSQL_USER);
-
-// 2. 필요한 라이브러리 불러오기
 const express = require('express');
 const cors = require('cors');
-const mysql = require('mysql2'); // ✅ MySQL 연결용
+require('dotenv').config();
 
-// 3. Express 앱 설정
+const OpenAI = require('openai');
+const db = require('./db');
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 4. MySQL 연결 설정
-const connection = mysql.createConnection({
-  host: process.env.MYSQL_HOST,     // .env에서 DB 호스트 읽기
-  user: process.env.MYSQL_USER,     // 사용자 이름
-  password: process.env.MYSQL_PASS, // 비밀번호
-  database: process.env.MYSQL_DB    // 데이터베이스 이름
-});
-
-// 5. 실제로 연결 시도 + 로그 출력
-connection.connect((err) => {
-  if (err) {
-    console.error('❌ MySQL 연결 실패:', err);
-  } else {
-    console.log('✅ MySQL에 성공적으로 연결되었습니다.');
-  }
-});
-
-// 6. 간단한 API 엔드포인트
-app.get('/', (req, res) => {
-  res.send('GPT 상담 백엔드 서버가 작동 중입니다!');
-});
-
-// 7. 서버 시작
-const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server listening on port ${PORT}`);
-});
-
-
-// 8. GPT test
-
-const OpenAI = require('openai');
-
+// GPT 세팅
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-async function testGPT() {
-  try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: [{ role: 'user', content: 'GPT야, 테스트 응답 해줘!' }],
-    });
+// 📌 POST /api/chat : 사용자 질문 → GPT → 응답 → DB 저장 → 응답 전송
+app.post('/api/chat', async (req, res) => {
+  const { userId, message } = req.body;
 
-    console.log('✅ GPT 응답:', response.choices[0].message.content);
-  } catch (err) {
-    console.error('❌ GPT 호출 실패:', err);
+  if (!userId || !message) {
+    return res.status(400).json({ error: 'userId 또는 message가 없습니다.' });
   }
-}
 
-testGPT();
+  try {
+    // GPT 호출 
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        {
+          role: "system", // system 프롬프트로 성격 설정
+          content: "너는 회사 고충을 듣는 친절하고 차분한 상담자야. 사용자의 말을 판단하지 않고 따뜻하게 반응해."
+        },
+        {
+          role: "user",
+          content: message
+        }
+      ],
+    });
+    
+    const gptReply = completion.choices[0].message.content;
+
+    // DB 저장
+    const query = `
+      INSERT INTO chat_logs (user_id, message, response)
+      VALUES (?, ?, ?)
+    `;
+    await db.query(query, [userId, message, gptReply]);
+
+    // 클라이언트에게 응답 전달
+    res.json({ reply: gptReply });
+
+  } catch (err) {
+    console.error('❌ GPT 처리 실패:', err);
+    res.status(500).json({ error: 'GPT 또는 DB 처리 중 오류' });
+  }
+});
+
+// GET /api/history/:userId 라우트 추가 (이전 대화 불러오기)
+
+app.get('/api/history/:userId', async (req, res) => {
+  const userId = req.params.userId;
+
+  try {
+    const [rows] = await db.query(
+      `SELECT id, message, response, timestamp
+       FROM chat_logs
+       WHERE user_id = ?
+       ORDER BY timestamp DESC`,
+      [userId]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error('❌ 대화 기록 조회 실패:', err);
+    res.status(500).json({ error: '대화 기록을 불러오는 데 실패했습니다.' });
+  }
+});
+
+// 기본 루트 확인용
+app.get('/', (req, res) => {
+  res.send('GPT 상담 백엔드 서버 작동 중입니다!');
+});
+
+const PORT = process.env.PORT || 4000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server listening on port ${PORT}`);
+});
