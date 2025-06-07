@@ -5,6 +5,9 @@ require('dotenv').config();
 const OpenAI = require('openai');
 const db = require('./db');
 
+const { v4: uuidv4 } = require('uuid'); // /api/session/start  UUID 생성 라이브러리 추가
+
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -15,29 +18,29 @@ const openai = new OpenAI({
 });
 
 // 📌 POST /api/chat : 사용자 질문 → GPT → 응답 → DB 저장 → 응답 전송
+  // 20250607 세션 ID 추가로 세션 별 대화 기억 추가
 app.post('/api/chat', async (req, res) => {
-  const { userId, message } = req.body;
+  const { userId, sessionId, message } = req.body;
 
-  if (!userId || !message) {
-    return res.status(400).json({ error: 'userId 또는 message가 없습니다.' });
+  if (!userId || !sessionId || !message) {
+    return res.status(400).json({ error: 'userId, sessionId 또는 message가 없습니다.' });
   }
 
   try {
-    // 상담 종료 처리
+    // 대화 종료 처리
     if (message.toLowerCase().includes('대화 종료')) {
-      // 1. 사용자의 전체 대화 불러오기
       const [logs] = await db.query(
-        `SELECT message, response FROM chat_logs WHERE user_id = ? ORDER BY timestamp`,
-        [userId]
+        `SELECT message, response FROM chat_logs 
+         WHERE user_id = ? AND session_id = ? 
+         ORDER BY timestamp`,
+        [userId, sessionId]
       );
 
-      // 2. 메시지를 GPT 요약용 포맷으로 구성
-      const chatHistory = logs.flatMap((log) => [
+      const chatHistory = logs.flatMap(log => [
         { role: 'user', content: log.message },
         { role: 'assistant', content: log.response }
       ]);
 
-      // 3. GPT에게 요약 요청
       const completion = await openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages: [
@@ -49,7 +52,6 @@ app.post('/api/chat', async (req, res) => {
 
       const summary = completion.choices[0].message.content;
 
-      // 4. 요약 DB에 저장
       await db.query(
         `INSERT INTO summary_logs (user_id, summary) VALUES (?, ?)`,
         [userId, summary]
@@ -58,25 +60,37 @@ app.post('/api/chat', async (req, res) => {
       return res.json({ message: '대화가 종료되었습니다.' });
     }
 
-    // 일반 메시지 처리
+    // 이전 대화 불러오기
+    const [chatHistory] = await db.query(
+      `SELECT message, response FROM chat_logs 
+       WHERE user_id = ? AND session_id = ? 
+       ORDER BY timestamp`,
+      [userId, sessionId]
+    );
+
+    const messages = [
+      { role: "system", content: "너는 고충을 파악하기 위한 역할이야. 짧고 간결하게 대답하고 고충의 원인을 파악해보도록 노력해." },
+      ...chatHistory.flatMap(row => [
+        { role: "user", content: row.message },
+        { role: "assistant", content: row.response }
+      ]),
+      { role: "user", content: message }
+    ];
+
     const completion = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
-      messages: [
-        { role: "system", content: "너는 고충을 파악하기 위한 역할이야. 짧고 간결하게 대답하고 고충의 원인을 파악해보도록 노력해." },
-        { role: "user", content: message }
-      ]
+      messages
     });
 
     const gptReply = completion.choices[0].message.content;
 
-    // DB 저장
     await db.query(
-      `INSERT INTO chat_logs (user_id, message, response) VALUES (?, ?, ?)`,
-      [userId, message, gptReply]
+      `INSERT INTO chat_logs (user_id, session_id, message, response) 
+       VALUES (?, ?, ?, ?)`,
+      [userId, sessionId, message, gptReply]
     );
 
     res.json({ reply: gptReply });
-
   } catch (err) {
     console.error('❌ 오류 발생:', err);
     res.status(500).json({ error: '서버 오류' });
@@ -84,9 +98,22 @@ app.post('/api/chat', async (req, res) => {
 });
 
 
+// 세션 ID 발급 라우트
+// 📌 POST /api/session/start 라우트 추가
+app.post('/api/session/start', (req, res) => {
+  const { userId } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ error: 'userId가 필요합니다.' });
+  }
+
+  const sessionId = uuidv4(); // 고유한 세션 ID 생성
+  res.json({ sessionId });     // 클라이언트에 전달
+});
+
 // 📌 GET /api/history/:userId 라우트 추가 (이전 대화 불러오기)
 
-// 최신 상담 요약 불러오기
+// /api/summary 최신 상담 요약 불러오기
 app.get('/api/summary', async (req, res) => {
   try {
     const [rows] = await db.query(
