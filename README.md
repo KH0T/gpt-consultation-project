@@ -22,14 +22,14 @@
 
 ## 📁 프로젝트 구조
 
-gpt-consultation-project/
-├── backend/
-│ ├── index.js # Express 서버
-│ ├── db.js # MySQL 연결
-│ └── .env # 환경 변수
-├── frontend/
-│ ├── App.jsx # 메인 React 컴포넌트
-│ ├── components/
-│ │ └── VueChat.vue # Vue 대화 UI
-│ └── vue/
-│ └── mountVue.js # Vue 마운트 스크립트
+- gpt-consultation-project/
+- ├── backend/
+- │ ├── index.js # Express 서버
+- │ ├── db.js # MySQL 연결
+- │ └── .env # 환경 변수
+- ├── frontend/
+- │ ├── App.jsx # 메인 React 컴포넌트
+- │ ├── components/
+- │ │ └── VueChat.vue # Vue 대화 UI
+- │ └── vue/
+- │ └── mountVue.js # Vue 마운트 스크립트
