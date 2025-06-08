@@ -12,6 +12,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+
 // 📌 GPT key
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -44,7 +45,7 @@ app.post('/api/chat', async (req, res) => {
       const completion = await openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages: [
-          { role: "system", content: "다음은 사용자와의 상담 내용이야. 전체적인 고민을 이해하고 요약해서 보고서 형식으로 정리해. 조언은 하지말고 결과만 담아" },
+          { role: "system", content: "너는 고충을 듣고 보고서 형식으로 이를 공유하기 위한 역할이야. 단답형식으로 짧게 표현하도록 노록해." },
           ...chatHistory,
           { role: "user", content: "이 대화를 요약해줘." }
         ]
@@ -111,20 +112,36 @@ app.post('/api/session/start', (req, res) => {
   res.json({ sessionId });     // 클라이언트에 전달
 });
 
-// 📌 GET /api/history/:userId 라우트 추가 (이전 대화 불러오기)
 
-// /api/summary 최신 상담 요약 불러오기
+// 📌 POST api/summary/:id/like 공감 처리 라우트
+app.post('/api/summary/:id/like', async (req, res) => {
+  const summaryId = req.params.id;
+
+  try {
+    await db.query(
+      `UPDATE summary_logs SET likes = likes + 1 WHERE id = ?`,
+      [summaryId]
+    );
+    res.json({ message: '공감이 추가되었습니다.' });
+  } catch (err) {
+    console.error('❌ 공감 처리 실패:', err);
+    res.status(500).json({ error: '공감 처리 실패' });
+  }
+});
+
+// 📌 GET api/summary/:id/like 공감 처리 라우트 (프론트 첫 화면 용)
+
 app.get('/api/summary', async (req, res) => {
   try {
-    const [rows] = await db.query(
-      `SELECT user_id, summary, created_at
-       FROM summary_logs
-       ORDER BY created_at DESC`
-    );
+    const [rows] = await db.query(`
+      SELECT id, user_id, summary, created_at, likes
+      FROM summary_logs
+      ORDER BY created_at DESC
+    `);
     res.json(rows);
   } catch (err) {
-    console.error('❌ 요약 전체 조회 실패:', err);
-    res.status(500).json({ error: '서버 오류' });
+    console.error('❌ 요약 불러오기 실패:', err);
+    res.status(500).json({ error: '요약을 불러오는 데 실패했습니다.' });
   }
 });
 
@@ -154,6 +171,7 @@ app.get('/api/summary/:userId', async (req, res) => {
     res.status(500).json({ error: '요약을 불러오는 데 실패했습니다.' });
   }
 });
+
 
 
 // 📌 기본 루트 확인용

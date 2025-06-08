@@ -3,6 +3,7 @@
     <h3>💬 Vue 챗봇</h3>
     <input v-model="message" @keyup.enter="sendMessage" placeholder="메시지를 입력하세요" />
     <button @click="sendMessage">전송</button>
+    <button @click="endChat" style="margin-left: 1rem;">🛑 대화 종료</button>
     <div v-for="(msg, i) in chatLog" :key="i">
       <p><strong>{{ msg.sender }}:</strong> {{ msg.text }}</p>
     </div>
@@ -15,7 +16,7 @@ export default {
     return {
       message: '',
       chatLog: [],
-      userId: 'user123',
+      userId: localStorage.getItem('userId') || 'user123',
       sessionId: localStorage.getItem('sessionId') || ''
     };
   },
@@ -55,6 +56,28 @@ export default {
       }
 
       this.message = '';
+    },
+
+    async endChat() {
+      if (!this.sessionId || !this.userId) return;
+
+      try {
+        await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: this.userId,
+            sessionId: this.sessionId,
+            message: '대화 종료'
+          })
+        });
+      } catch (err) {
+        console.error('대화 종료 실패:', err);
+      }
+
+      localStorage.removeItem('sessionId');
+      localStorage.removeItem('userId');
+      window.location.reload();
     }
   }
 };
